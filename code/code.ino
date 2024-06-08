@@ -2,31 +2,40 @@
 #include <ESPAsyncWebServer.h>
 #include <ESP32Servo.h>
 #include <ESP32Time.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SH110X.h>
 
 const char* ssid = "0rphan";
 const char* password = "mooncake";
 
 #define SERVO_PIN 13
 
-#define TRIG_PIN 14
-#define ECHO_PIN 12
-#define IR_SPOT1_PIN 33
-#define IR_SPOT2_PIN 32
-#define MQ2_DO_PIN 18
+#define TRIG_PIN 12
+#define ECHO_PIN 14
 
-// RGB LEDs for each parking spot
+#define MQ135_DO_PIN 18
+
+#define IR_SPOT1_PIN 33
 #define RED_SPOT1_PIN 25
 #define GREEN_SPOT1_PIN 26
 #define BLUE_SPOT1_PIN 27
 
-#define RED_SPOT2_PIN 15
+#define IR_SPOT2_PIN 5
+#define RED_SPOT2_PIN 4
 #define GREEN_SPOT2_PIN 2
-#define BLUE_SPOT2_PIN 4
+#define BLUE_SPOT2_PIN 15
 
 Servo servo;
 bool spot1Occupied = false, spot2Occupied = false;
 bool isOpen;
 int carCount = 0; // Counter for cars in the parking lot
+
+#define SCREEN_ADDRESS 0x3c //initialize with the I2C addr 0x3C Typically eBay OLED's
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+#define OLED_RESET -1   //   QT-PY / XIAO
+Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 ESP32Time rtc(3600);
 AsyncWebServer server(80);
@@ -40,7 +49,11 @@ void setup()
   pinMode(ECHO_PIN, INPUT);
   pinMode(IR_SPOT1_PIN, INPUT);
   pinMode(IR_SPOT2_PIN, INPUT);
-  pinMode(MQ2_DO_PIN, INPUT);
+  pinMode(MQ135_DO_PIN, INPUT);
+
+  display.begin(SCREEN_ADDRESS, true);
+  display.display();
+  display.clearDisplay();
 
   // Setup RGB LEDs for each spot
   pinMode(RED_SPOT1_PIN, OUTPUT);
@@ -71,23 +84,13 @@ void setup()
     String page = "<!DOCTYPE html><html><head><title>Parking System</title></head><body>";
     page += "<h1>Parking System</h1>";
     page += "<p>Gate: ";
-    if (isOpen) {
-      page += "Open</p>";
-    } else {
-      page += "Closed</p>";
-    }
+    page += isOpen ? "Open</p>" : "Closed</p>";
     page += "<p>Spot 1: ";
-    if (spot1Occupied) {
-      page += "Occupied</p>";
-    } else {
-      page += "Vacant</p>";
-    }
+    page += spot1Occupied ? "Occupied</p>" : "Vacant</p>";
     page += "<p>Spot 2: ";
-    if (spot2Occupied) {
-      page += "Occupied</p>";
-    } else {
-      page += "Vacant</p>";
-    }
+    page += spot2Occupied ? "Occupied</p>" : "Vacant</p>";
+    page += "<p>air quality: ";
+    page += digitalRead(MQ135_DO_PIN) == HIGH ? "Clean</p>" : "Not clean</p>";
     page += "<p>Current Time: ";
     page += rtc.getTime("%A, %B %d %Y %H:%M:%S");
     page += "</p>";
@@ -115,8 +118,9 @@ void loop()
   checkGate();
   checkParkingSpot(IR_SPOT1_PIN, spot1Occupied, RED_SPOT1_PIN, GREEN_SPOT1_PIN, BLUE_SPOT1_PIN);
   checkParkingSpot(IR_SPOT2_PIN, spot2Occupied, RED_SPOT2_PIN, GREEN_SPOT2_PIN, BLUE_SPOT2_PIN);
-  delay(100);
+  updateOLED();
   Serial.println(rtc.getTime("%A, %B %d %Y %H:%M:%S"));  
+  delay(100);
 }
 
 void checkGate() 
@@ -167,6 +171,8 @@ void openGate()
     servo.write(90);
     isOpen = true;
     Serial.println("open");
+    updateOLED();
+    delay(5000);
   }
 }
 
@@ -179,6 +185,7 @@ void closeGate()
     servo.write(90);
     isOpen = false;
     Serial.println("closed");
+    updateOLED();
   }
 }
 
@@ -202,6 +209,24 @@ void updateLED(int redPin, int greenPin, int bluePin, bool occupied) {
     digitalWrite(greenPin, HIGH);
     digitalWrite(bluePin, LOW);
   }
-
 }
 
+void updateOLED(){
+  String data = "";
+  data += "Gate: ";
+  data += isOpen ? "Open\n" : "Closed\n";
+  data += "Spot 1: ";
+  data += spot1Occupied ? "Occupied\n" : "Vacant\n";
+  data += "Spot 2: ";
+  data += spot2Occupied ? "Occupied\n" : "Vacant\n";
+  data += "air quality: ";
+  data += digitalRead(MQ135_DO_PIN) == HIGH ? "Clean\n" : "Not clean\n";
+  data += "Current Time: ";
+  data += rtc.getTime("%A, %B %d %Y %H:%M:%S\n");
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SH110X_WHITE);
+  display.setCursor(0, 0);
+  display.println(data);
+  display.display();
+}
